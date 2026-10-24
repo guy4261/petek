@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f1f0ec">
+  <title>פתק</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f1f0ec; }
+    main { min-height: 100svh; display: grid; place-items: center; overflow: hidden; }
+    .ballot {
+      width: min(300px, 56vw, 56svh);
+      aspect-ratio: 210 / 297;
+      container-type: inline-size;
+      background: #fff;
+      box-shadow: 0 12px 35px #00000012, 0 1px 3px #0000000d;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      transform: rotate(var(--angle, 10deg));
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+    .ballot.dragging { cursor: grabbing; }
+    .text {
+      display: block;
+      width: 100%;
+      padding: 0;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      outline: none;
+      background: transparent;
+      color: #111;
+      text-align: center;
+      font-family: 'Times New Roman', serif;
+      cursor: text;
+      touch-action: auto;
+      user-select: text;
+    }
+    .text:focus-visible { outline: 1px solid #dadada; outline-offset: 5px; }
+    #letters { font-size: 38cqw; line-height: 1.1; font-weight: 700; height: 44cqw; }
+    #caption { font-size: 7cqw; line-height: 1.35; resize: none; overflow: hidden; margin-top: 3cqw; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="ballot" id="ballot" role="group" aria-label="פתק הצבעה. גררו את הנייר לסיבוב">
+      <input class="text" id="letters" aria-label="אותיות הפתק, עד שלוש אותיות" maxlength="3" value="כאן" autocomplete="off" spellcheck="false">
+      <textarea class="text" id="caption" aria-label="המשפט שמתחת לאותיות" maxlength="80" rows="1" spellcheck="false">לוחצים כדי לשנות, גוררים כדי לסובב</textarea>
+    </div>
+  </main>
+  <script>
+    const ballot = document.getElementById('ballot');
+    const caption = document.getElementById('caption');
+    const letters = document.getElementById('letters');
+    let rotation = 10;
+    let drag = null;
+    function syncAddress() {
+      const url = new URL(window.location.href);
+      url.searchParams.set('letters', letters.value);
+      url.searchParams.set('text', caption.value);
+      url.searchParams.set('angle', String(Math.round(((rotation % 360 + 360) % 360) * 100) / 100));
+      history.replaceState(null, '', url.href);
+    }
+    function restoreAddress() {
+      const params = new URL(window.location.href).searchParams;
+      letters.value = (params.get('letters') ?? 'כאן').slice(0, 3);
+      caption.value = (params.get('text') ?? 'לוחצים כדי לשנות, גוררים כדי לסובב').slice(0, 80);
+      const angle = Number(params.get('angle') ?? 10);
+      rotation = Number.isFinite(angle) ? ((angle % 360) + 360) % 360 : 10;
+      ballot.style.setProperty('--angle', rotation + 'deg');
+      fitCaption();
+    }
+    function fitCaption() {
+      caption.style.height = 'auto';
+      caption.style.height = caption.scrollHeight + 'px';
+    }
+    caption.addEventListener('input', fitCaption);
+    letters.addEventListener('input', syncAddress);
+    caption.addEventListener('input', syncAddress);
+    window.addEventListener('popstate', restoreAddress);
+    new ResizeObserver(fitCaption).observe(ballot);
+    function pointerAngle(event, center) {
+      return Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
+    }
+    ballot.addEventListener('pointerdown', event => {
+      if (event.target.closest('input, textarea') || event.button !== 0 || drag) return;
+      const rect = ballot.getBoundingClientRect();
+      const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      drag = { id: event.pointerId, center, last: pointerAngle(event, center) };
+      document.activeElement.blur();
+      ballot.setPointerCapture(event.pointerId);
+      ballot.classList.add('dragging');
+      event.preventDefault();
+    });
+    ballot.addEventListener('pointermove', event => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const angle = pointerAngle(event, drag.center);
+      const delta = ((angle - drag.last + 540) % 360) - 180;
+      rotation += delta;
+      drag.last = angle;
+      ballot.style.setProperty('--angle', rotation + 'deg');
+      syncAddress();
+    });
+    function endDrag(event) {
+      if (!drag || event.pointerId !== drag.id) return;
+      drag = null;
+      ballot.classList.remove('dragging');
+      if (ballot.hasPointerCapture(event.pointerId)) ballot.releasePointerCapture(event.pointerId);
+    }
+    ballot.addEventListener('pointerup', endDrag);
+    ballot.addEventListener('pointercancel', endDrag);
+    ballot.addEventListener('lostpointercapture', endDrag);
+    restoreAddress();
+    syncAddress();
+  </script>
+</body>
+</html>
+
+
