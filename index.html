@@ -3,24 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f1f0ec">
+  <meta name="theme-color" content="#ffffff">
   <title>פתק</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f1f0ec; }
+    body { margin: 0; background: #fff; }
+    #export { position: fixed; top: 20px; right: 20px; z-index: 2; padding: 10px 16px; border: 1px solid #ddd; border-radius: 7px; background: #fff; color: #333; font: 14px Arial, sans-serif; cursor: pointer; }
+    #angle { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); color: #777; font: 13px Arial, sans-serif; direction: ltr; font-variant-numeric: tabular-nums; }
     main { min-height: 100svh; display: grid; place-items: center; overflow: hidden; }
     .ballot {
+      position: relative;
       width: min(300px, 56vw, 56svh);
       aspect-ratio: 210 / 297;
       container-type: inline-size;
       background: #fff;
+      outline: 1px solid #b8b8b8;
       box-shadow: 0 12px 35px #00000012, 0 1px 3px #0000000d;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 24px;
-      transform: rotate(var(--angle, 10deg));
+      transform: rotate(var(--angle, 0deg));
       cursor: grab;
       touch-action: none;
       user-select: none;
@@ -48,6 +52,8 @@
   </style>
 </head>
 <body>
+  <button id="export" type="button">שמירת תמונה ↓</button>
+  <output id="angle" aria-label="זווית הסיבוב">0°</output>
   <main>
     <div class="ballot" id="ballot" role="group" aria-label="פתק הצבעה. גררו את הנייר לסיבוב">
       <input class="text" id="letters" aria-label="אותיות הפתק, עד שלוש אותיות" maxlength="3" value="כאן" autocomplete="off" spellcheck="false">
@@ -58,8 +64,14 @@
     const ballot = document.getElementById('ballot');
     const caption = document.getElementById('caption');
     const letters = document.getElementById('letters');
-    let rotation = 10;
+    const angleMarker = document.getElementById('angle');
+    let rotation = 0;
     let drag = null;
+    function normalizedAngle(value) { return ((value % 360) + 360) % 360; }
+    function renderRotation() {
+      ballot.style.setProperty('--angle', rotation + 'deg');
+      angleMarker.value = Number(normalizedAngle(rotation).toFixed(1)) + '°';
+    }
     function syncAddress() {
       const url = new URL(window.location.href);
       url.searchParams.set('letters', letters.value);
@@ -71,9 +83,9 @@
       const params = new URL(window.location.href).searchParams;
       letters.value = (params.get('letters') ?? 'כאן').slice(0, 3);
       caption.value = (params.get('text') ?? 'לוחצים כדי לשנות, גוררים כדי לסובב').slice(0, 80);
-      const angle = Number(params.get('angle') ?? 10);
-      rotation = Number.isFinite(angle) ? ((angle % 360) + 360) % 360 : 10;
-      ballot.style.setProperty('--angle', rotation + 'deg');
+      const angle = Number(params.get('angle') ?? 0);
+      rotation = Number.isFinite(angle) ? normalizedAngle(angle) : 0;
+      renderRotation();
       fitCaption();
     }
     function fitCaption() {
@@ -92,7 +104,7 @@
       if (event.target.closest('input, textarea') || event.button !== 0 || drag) return;
       const rect = ballot.getBoundingClientRect();
       const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      drag = { id: event.pointerId, center, last: pointerAngle(event, center) };
+      drag = { id: event.pointerId, center, last: pointerAngle(event, center), raw: rotation };
       document.activeElement.blur();
       ballot.setPointerCapture(event.pointerId);
       ballot.classList.add('dragging');
@@ -102,9 +114,11 @@
       if (!drag || event.pointerId !== drag.id) return;
       const angle = pointerAngle(event, drag.center);
       const delta = ((angle - drag.last + 540) % 360) - 180;
-      rotation += delta;
+      drag.raw += delta;
+      const normalized = normalizedAngle(drag.raw);
+      rotation = Math.min(normalized, 360 - normalized) <= 5 ? Math.round(drag.raw / 360) * 360 : drag.raw;
       drag.last = angle;
-      ballot.style.setProperty('--angle', rotation + 'deg');
+      renderRotation();
       syncAddress();
     });
     function endDrag(event) {
@@ -116,6 +130,62 @@
     ballot.addEventListener('pointerup', endDrag);
     ballot.addEventListener('pointercancel', endDrag);
     ballot.addEventListener('lostpointercapture', endDrag);
+    document.getElementById('export').addEventListener('click', async () => {
+      const button = document.getElementById('export');
+      button.disabled = true;
+      try {
+        await document.fonts.ready;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1024;
+        const ctx = canvas.getContext('2d');
+        const width = ballot.offsetWidth;
+        const height = ballot.offsetHeight;
+        const radians = normalizedAngle(rotation) * Math.PI / 180;
+        const bounds = Math.max(Math.abs(Math.cos(radians)) * width + Math.abs(Math.sin(radians)) * height, Math.abs(Math.sin(radians)) * width + Math.abs(Math.cos(radians)) * height);
+        const scale = 960 / bounds;
+        ctx.translate(512, 512);
+        ctx.scale(scale, scale);
+        ctx.rotate(radians);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(-width / 2, -height / 2, width, height);
+        ctx.strokeStyle = '#b8b8b8';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-width / 2, -height / 2, width, height);
+        ctx.fillStyle = '#111';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.direction = 'rtl';
+        const captionStyle = getComputedStyle(caption);
+        ctx.font = captionStyle.font;
+        const lines = [];
+        for (const paragraph of caption.value.split('\n')) {
+          let line = '';
+          for (const char of paragraph) {
+            if (line && ctx.measureText(line + char).width > caption.clientWidth) { lines.push(line); line = ''; }
+            line += char;
+          }
+          lines.push(line);
+        }
+        // Use the live fields' positions so both the screen and export share the same layout.
+        const top = -height / 2;
+        ctx.font = getComputedStyle(letters).font;
+        ctx.fillText(letters.value, 0, top + letters.offsetTop + letters.offsetHeight / 2);
+        ctx.font = captionStyle.font;
+        const lineHeight = parseFloat(captionStyle.lineHeight);
+        lines.forEach((line, index) => ctx.fillText(line, 0, top + caption.offsetTop + lineHeight * (index + 0.5)));
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('PNG export failed');
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'petek.png';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (error) {
+        console.error(error);
+        alert('לא ניתן לשמור את התמונה. נסו שוב.');
+      } finally { button.disabled = false; }
+    });
     restoreAddress();
     syncAddress();
   </script>
