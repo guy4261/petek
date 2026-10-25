@@ -178,6 +178,9 @@
     function touchDistance(touches) {
       return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
     }
+    function touchAngle(touches) {
+      return Math.atan2(touches[1].clientY - touches[0].clientY, touches[1].clientX - touches[0].clientX) * 180 / Math.PI;
+    }
     // Delay opening the keyboard until a one-finger tap is complete.
     document.addEventListener('pointerdown', event => {
       if (event.pointerType !== 'touch') { suppressTouchClick = false; return; }
@@ -197,21 +200,40 @@
       if (drag) endDrag({ pointerId: drag.id });
       document.activeElement?.blur();
       const y = (event.touches[0].clientY + event.touches[1].clientY) / 2;
-      pinch = { field: fieldForPageY(y), distance: touchDistance(event.touches) };
+      pinch = {
+        field: fieldForPageY(y),
+        ids: [event.touches[0].identifier, event.touches[1].identifier],
+        distance: touchDistance(event.touches),
+        angle: touchAngle(event.touches),
+        rawRotation: rotation
+      };
     }, { passive: false, capture: true });
     document.addEventListener('touchmove', event => {
       if (tap && event.touches.length === 1 && Math.hypot(event.touches[0].clientX - tap.x, event.touches[0].clientY - tap.y) > 8) tap = null;
       if (!pinch || event.touches.length !== 2) return;
       event.preventDefault();
-      const distance = touchDistance(event.touches);
+      const pair = pinch.ids.map(id => Array.from(event.touches).find(touch => touch.identifier === id));
+      if (pair.some(touch => !touch)) return;
+      const distance = touchDistance(pair);
+      const angle = touchAngle(pair);
+      if (distance >= 20 && pinch.distance >= 20) {
+        const delta = ((angle - pinch.angle + 540) % 360) - 180;
+        pinch.rawRotation += delta;
+        const normalized = normalizedAngle(pinch.rawRotation);
+        rotation = Math.min(normalized, 360 - normalized) <= 5 ? Math.round(pinch.rawRotation / 360) * 360 : pinch.rawRotation;
+        renderRotation();
+      }
+      pinch.angle = angle;
       if (pinch.distance >= 20 && distance >= 20) {
         const factor = Math.pow(distance / pinch.distance, 0.3);
         resizeText(pinch.field, Math.max(0.98, Math.min(1.02, factor)));
       }
       pinch.distance = distance;
+      syncAddress();
     }, { passive: false, capture: true });
     document.addEventListener('touchend', event => {
       if (suppressTouchClick) event.preventDefault();
+      if (event.touches.length < 2) pinch = null;
       if (!event.touches.length) {
         if (tap?.field && !suppressTouchClick) {
           event.preventDefault();
