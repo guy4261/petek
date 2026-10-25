@@ -45,7 +45,7 @@
       background: transparent;
       color: #111;
       text-align: center;
-      font-family: 'Times New Roman', serif;
+      font-family: David, 'Times New Roman', serif;
       cursor: text;
       touch-action: auto;
       user-select: text;
@@ -114,8 +114,8 @@
       const style = getComputedStyle(ballot);
       const width = ballot.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
       const height = ballot.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-      let upper = Math.max(24, width * 0.38 * textSizes.letters);
-      let lower = Math.max(12, width * 0.07 * textSizes.caption);
+      let upper = Math.min(110, Math.max(24, width * 0.38 * textSizes.letters));
+      let lower = Math.min(35, Math.max(12, width * 0.07 * textSizes.caption));
       // Fit the actual glyphs, including wide Latin letters, inside the text field.
       letters.style.fontSize = upper + 'px';
       measure.font = getComputedStyle(letters).font;
