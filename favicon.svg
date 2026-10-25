@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <g transform="rotate(5 64 64)">
+    <rect x="27" y="12" width="74" height="104.66" fill="white" stroke="#b8b8b8" stroke-width="2"/>
+    <text x="64" y="66" text-anchor="middle" direction="rtl" font-family="Times New Roman, serif" font-size="35" font-weight="bold" fill="#111">פתק</text>
+    <text x="64" y="80" text-anchor="middle" direction="rtl" font-family="Times New Roman, serif" font-size="7.5" fill="#111">מחולל פתקי הצבעה</text>
+  </g>
+</svg>
