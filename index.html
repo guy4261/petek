@@ -17,7 +17,7 @@
       aspect-ratio: 210 / 297;
       container-type: inline-size;
       background: #fff;
-      outline: 1px solid #b8b8b8;
+      outline: 2px solid #b8b8b8;
       box-shadow: 0 12px 35px #00000012, 0 1px 3px #0000000d;
       display: flex;
       flex-direction: column;
@@ -45,9 +45,10 @@
       cursor: text;
       touch-action: auto;
       user-select: text;
+      flex-shrink: 0;
     }
     .text:focus-visible { outline: 1px solid #dadada; outline-offset: 5px; }
-    #letters { font-size: 38cqw; line-height: 1.1; font-weight: 700; height: 44cqw; }
+    #letters { font-size: 38cqw; line-height: 1.1; font-weight: 700; height: 1.16em; }
     #caption { font-size: 7cqw; line-height: 1.35; resize: none; overflow: hidden; margin-top: 3cqw; }
   </style>
 </head>
@@ -67,6 +68,8 @@
     const angleMarker = document.getElementById('angle');
     let rotation = 0;
     let drag = null;
+    const textSizes = { letters: 1, caption: 1 };
+    const measure = document.createElement('canvas').getContext('2d');
     function normalizedAngle(value) { return ((value % 360) + 360) % 360; }
     function renderRotation() {
       ballot.style.setProperty('--angle', rotation + 'deg');
@@ -77,6 +80,8 @@
       url.searchParams.set('letters', letters.value);
       url.searchParams.set('text', caption.value);
       url.searchParams.set('angle', String(Math.round(((rotation % 360 + 360) % 360) * 100) / 100));
+      url.searchParams.set('upperSize', textSizes.letters.toFixed(3));
+      url.searchParams.set('lowerSize', textSizes.caption.toFixed(3));
       history.replaceState(null, '', url.href);
     }
     function restoreAddress() {
@@ -85,18 +90,72 @@
       caption.value = (params.get('text') ?? 'לוחצים כדי לשנות, גוררים כדי לסובב').slice(0, 80);
       const angle = Number(params.get('angle') ?? 0);
       rotation = Number.isFinite(angle) ? normalizedAngle(angle) : 0;
+      for (const [id, key] of [['letters', 'upperSize'], ['caption', 'lowerSize']]) {
+        const size = Number(params.get(key) ?? 1);
+        textSizes[id] = Number.isFinite(size) && size > 0 ? Math.max(0.2, Math.min(5, size)) : 1;
+      }
       renderRotation();
-      fitCaption();
+      layoutText();
     }
     function fitCaption() {
       caption.style.height = 'auto';
       caption.style.height = caption.scrollHeight + 'px';
     }
-    caption.addEventListener('input', fitCaption);
-    letters.addEventListener('input', syncAddress);
-    caption.addEventListener('input', syncAddress);
+    function layoutText() {
+      const style = getComputedStyle(ballot);
+      const width = ballot.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const height = ballot.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+      let upper = width * 0.38 * textSizes.letters;
+      let lower = width * 0.07 * textSizes.caption;
+      // Fit the actual glyphs, including wide Latin letters, inside the text field.
+      letters.style.fontSize = upper + 'px';
+      measure.font = getComputedStyle(letters).font;
+      const measuredWidth = measure.measureText(letters.value).width;
+      if (measuredWidth > width - 4) upper *= (width - 4) / measuredWidth;
+      for (let i = 0; i < 100; i++) {
+        letters.style.fontSize = upper + 'px';
+        caption.style.fontSize = lower + 'px';
+        fitCaption();
+        const used = letters.offsetHeight + caption.offsetHeight + parseFloat(getComputedStyle(caption).marginTop);
+        if (used <= height) break;
+        upper *= 0.95;
+        lower *= 0.95;
+      }
+    }
+    function resizeText(field, factor) {
+      textSizes[field.id] = Math.max(0.2, Math.min(5, textSizes[field.id] * factor));
+      layoutText();
+      syncAddress();
+    }
+    for (const field of [letters, caption]) {
+      field.addEventListener('input', () => { layoutText(); syncAddress(); });
+      field.addEventListener('wheel', event => {
+        if (!event.deltaY) return;
+        event.preventDefault();
+        resizeText(field, event.deltaY < 0 ? 1.06 : 1 / 1.06);
+      }, { passive: false });
+    }
+    let pinch = null;
+    function touchDistance(touches) {
+      return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    }
+    ballot.addEventListener('touchstart', event => {
+      if (event.touches.length !== 2) return;
+      const field = event.touches[0].target.closest('input, textarea');
+      if (!field) return;
+      event.preventDefault();
+      pinch = { field, distance: touchDistance(event.touches) };
+    }, { passive: false });
+    ballot.addEventListener('touchmove', event => {
+      if (!pinch || event.touches.length !== 2) return;
+      event.preventDefault();
+      const distance = touchDistance(event.touches);
+      if (pinch.distance > 0 && distance > 0) resizeText(pinch.field, distance / pinch.distance);
+      pinch.distance = distance;
+    }, { passive: false });
+    for (const name of ['touchend', 'touchcancel']) ballot.addEventListener(name, () => { pinch = null; });
     window.addEventListener('popstate', restoreAddress);
-    new ResizeObserver(fitCaption).observe(ballot);
+    new ResizeObserver(layoutText).observe(ballot);
     function pointerAngle(event, center) {
       return Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
     }
@@ -149,7 +208,7 @@
         ctx.fillStyle = '#fff';
         ctx.fillRect(-width / 2, -height / 2, width, height);
         ctx.strokeStyle = '#b8b8b8';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 2;
         ctx.strokeRect(-width / 2, -height / 2, width, height);
         ctx.fillStyle = '#111';
         ctx.textAlign = 'center';
