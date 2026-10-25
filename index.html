@@ -53,7 +53,7 @@
   </style>
 </head>
 <body>
-  <button id="export" type="button">שמירת תמונה ↓</button>
+  <button id="export" type="button">העתקה ושמירת תמונה ↓</button>
   <output id="angle" aria-label="זווית הסיבוב">0°</output>
   <main>
     <div class="ballot" id="ballot" role="group" aria-label="פתק הצבעה. גררו את הנייר לסיבוב">
@@ -112,6 +112,10 @@
       measure.font = getComputedStyle(letters).font;
       const measuredWidth = measure.measureText(letters.value).width;
       if (measuredWidth > width - 4) upper *= (width - 4) / measuredWidth;
+      caption.style.fontSize = lower + 'px';
+      measure.font = getComputedStyle(caption).font;
+      const longestWord = Math.max(0, ...caption.value.split(/\s+/u).map(word => measure.measureText(word).width));
+      if (longestWord > width - 4) lower *= (width - 4) / longestWord;
       for (let i = 0; i < 100; i++) {
         letters.style.fontSize = upper + 'px';
         caption.style.fontSize = lower + 'px';
@@ -201,9 +205,34 @@
     ballot.addEventListener('pointerup', endDrag);
     ballot.addEventListener('pointercancel', endDrag);
     ballot.addEventListener('lostpointercapture', endDrag);
+    function wrapWords(ctx, text, width) {
+      const lines = [];
+      for (const paragraph of text.split('\n')) {
+        let line = '';
+        for (const word of paragraph.match(/\S+/gu) ?? []) {
+          const candidate = line ? line + ' ' + word : word;
+          if (line && ctx.measureText(candidate).width > width) {
+            lines.push(line);
+            line = word;
+          } else { line = candidate; }
+        }
+        lines.push(line);
+      }
+      return lines;
+    }
     document.getElementById('export').addEventListener('click', async () => {
       const button = document.getElementById('export');
       button.disabled = true;
+      // Start the clipboard write during the click, before asynchronous PNG rendering.
+      let resolvePNG, rejectPNG;
+      const pngPromise = new Promise((resolve, reject) => { resolvePNG = resolve; rejectPNG = reject; });
+      pngPromise.catch(() => {});
+      let copied = Promise.resolve(false);
+      if (navigator.clipboard?.write && window.ClipboardItem) {
+        try {
+          copied = navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]).then(() => true, () => false);
+        } catch { /* Saving remains available when clipboard images are unsupported. */ }
+      }
       try {
         await document.fonts.ready;
         const canvas = document.createElement('canvas');
@@ -228,15 +257,7 @@
         ctx.direction = 'rtl';
         const captionStyle = getComputedStyle(caption);
         ctx.font = captionStyle.font;
-        const lines = [];
-        for (const paragraph of caption.value.split('\n')) {
-          let line = '';
-          for (const char of paragraph) {
-            if (line && ctx.measureText(line + char).width > caption.clientWidth) { lines.push(line); line = ''; }
-            line += char;
-          }
-          lines.push(line);
-        }
+        const lines = wrapWords(ctx, caption.value, caption.clientWidth);
         // Use the live fields' positions so both the screen and export share the same layout.
         const top = -height / 2;
         ctx.font = getComputedStyle(letters).font;
@@ -246,13 +267,17 @@
         lines.forEach((line, index) => ctx.fillText(line, 0, top + caption.offsetTop + lineHeight * (index + 0.5)));
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
         if (!blob) throw new Error('PNG export failed');
+        resolvePNG(blob);
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = 'petek.png';
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 60000);
+        button.textContent = await copied ? 'התמונה הועתקה ונשמרה ✓' : 'התמונה נשמרה ✓';
+        setTimeout(() => { button.textContent = 'העתקה ושמירת תמונה ↓'; }, 3000);
       } catch (error) {
+        rejectPNG(error);
         console.error(error);
         alert('לא ניתן לשמור את התמונה. נסו שוב.');
       } finally { button.disabled = false; }
