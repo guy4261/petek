@@ -8,7 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; background: #fff; }
+    body { margin: 0; background: #fff; touch-action: none; }
     .tools { position: fixed; top: 20px; right: 20px; z-index: 2; display: flex; gap: 8px; }
     .tools button { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid #ddd; border-radius: 7px; background: #fff; color: #333; cursor: pointer; }
     .tools svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -143,52 +143,79 @@
     for (const field of [letters, caption]) {
       field.addEventListener('input', () => { layoutText(); syncAddress(); });
     }
-    // Keep the wheel target usable even when a small caption is only a few pixels high
-    // or resizing moves it out from underneath the pointer.
-    ballot.addEventListener('wheel', event => {
+    function fieldForPageY(y) {
+      return y < window.innerHeight / 2 ? letters : caption;
+    }
+    document.addEventListener('wheel', event => {
       if (!event.deltaY) return;
       event.preventDefault();
-      let field = event.target.closest('input, textarea');
-      if (!field) {
-        const rect = ballot.getBoundingClientRect();
-        const radians = rotation * Math.PI / 180;
-        const dx = event.clientX - (rect.left + rect.width / 2);
-        const dy = event.clientY - (rect.top + rect.height / 2);
-        const localY = -dx * Math.sin(radians) + dy * Math.cos(radians) + ballot.offsetHeight / 2;
-        const boundary = (letters.offsetTop + letters.offsetHeight + caption.offsetTop) / 2;
-        field = localY >= boundary ? caption : letters;
-      }
-      resizeText(field, event.deltaY < 0 ? 1.15 : 1 / 1.15);
+      resizeText(fieldForPageY(event.clientY), event.deltaY < 0 ? 1.15 : 1 / 1.15);
     }, { passive: false });
     let pinch = null;
+    let tap = null;
+    let suppressTouchClick = false;
     function touchDistance(touches) {
       return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
     }
-    ballot.addEventListener('touchstart', event => {
+    // Delay opening the keyboard until a one-finger tap is complete.
+    document.addEventListener('pointerdown', event => {
+      if (event.pointerType !== 'touch') { suppressTouchClick = false; return; }
+      const field = event.target.closest('input, textarea');
+      if (field && document.activeElement !== field) field.readOnly = true;
+    }, true);
+    document.addEventListener('touchstart', event => {
+      if (event.touches.length === 1) {
+        suppressTouchClick = false;
+        const touch = event.touches[0];
+        tap = { field: touch.target.closest('input, textarea'), x: touch.clientX, y: touch.clientY };
+      }
       if (event.touches.length !== 2) return;
-      const field = event.touches[0].target.closest('input, textarea');
-      if (!field) return;
       event.preventDefault();
-      pinch = { field, distance: touchDistance(event.touches) };
-    }, { passive: false });
-    ballot.addEventListener('touchmove', event => {
+      tap = null;
+      suppressTouchClick = true;
+      if (drag) endDrag({ pointerId: drag.id });
+      document.activeElement?.blur();
+      const y = (event.touches[0].clientY + event.touches[1].clientY) / 2;
+      pinch = { field: fieldForPageY(y), distance: touchDistance(event.touches) };
+    }, { passive: false, capture: true });
+    document.addEventListener('touchmove', event => {
+      if (tap && event.touches.length === 1 && Math.hypot(event.touches[0].clientX - tap.x, event.touches[0].clientY - tap.y) > 8) tap = null;
       if (!pinch || event.touches.length !== 2) return;
       event.preventDefault();
       const distance = touchDistance(event.touches);
       if (pinch.distance >= 20 && distance >= 20) {
-        const gentleFactor = Math.pow(distance / pinch.distance, 0.3);
-        resizeText(pinch.field, Math.max(0.98, Math.min(1.02, gentleFactor)));
+        const factor = Math.pow(distance / pinch.distance, 0.3);
+        resizeText(pinch.field, Math.max(0.98, Math.min(1.02, factor)));
       }
       pinch.distance = distance;
-    }, { passive: false });
-    for (const name of ['touchend', 'touchcancel']) ballot.addEventListener(name, () => { pinch = null; });
+    }, { passive: false, capture: true });
+    document.addEventListener('touchend', event => {
+      if (suppressTouchClick) event.preventDefault();
+      if (!event.touches.length) {
+        if (tap?.field && !suppressTouchClick) {
+          event.preventDefault();
+          tap.field.readOnly = false;
+          tap.field.focus();
+        }
+        tap = null;
+        pinch = null;
+        letters.readOnly = caption.readOnly = false;
+      }
+    }, { passive: false, capture: true });
+    document.addEventListener('touchcancel', () => {
+      tap = pinch = null;
+      letters.readOnly = caption.readOnly = false;
+    }, { capture: true });
+    document.addEventListener('click', event => {
+      if (suppressTouchClick) { event.preventDefault(); event.stopPropagation(); }
+    }, true);
     window.addEventListener('popstate', restoreAddress);
     new ResizeObserver(layoutText).observe(ballot);
     function pointerAngle(event, center) {
       return Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
     }
     ballot.addEventListener('pointerdown', event => {
-      if (event.target.closest('input, textarea') || event.button !== 0 || drag) return;
+      if (pinch || event.target.closest('input, textarea') || event.button !== 0 || drag) return;
       const rect = ballot.getBoundingClientRect();
       const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
       drag = { id: event.pointerId, center, last: pointerAngle(event, center), raw: rotation };
