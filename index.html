@@ -66,7 +66,7 @@
   <output id="angle" aria-label="זווית הסיבוב">0°</output>
   <main>
     <div class="ballot" id="ballot" role="group" aria-label="פתק הצבעה. גררו את הנייר לסיבוב">
-      <input class="text" id="letters" aria-label="אותיות הפתק, עד שלוש אותיות" maxlength="3" value="כאן" autocomplete="off" spellcheck="false">
+      <input class="text" id="letters" aria-label="אותיות הפתק, עד שלוש אותיות, ללא ספירת ניקוד" value="כאן" autocomplete="off" spellcheck="false">
       <textarea class="text" id="caption" aria-label="המשפט שמתחת לאותיות" maxlength="80" rows="1" spellcheck="false">לוחצים כדי לשנות, גוררים כדי לסובב</textarea>
     </div>
   </main>
@@ -79,6 +79,17 @@
     let drag = null;
     const textSizes = { letters: 1, caption: 1 };
     const measure = document.createElement('canvas').getContext('2d');
+    function limitLetters(text) {
+      let result = '';
+      let count = 0;
+      for (const character of text) {
+        // Hebrew vowel and cantillation marks belong to the preceding letter.
+        const isHebrewMark = /^[\u0591-\u05BD\u05BF\u05C1-\u05C2\u05C4-\u05C5\u05C7]$/u.test(character);
+        if (!isHebrewMark && ++count > 3) break;
+        result += character;
+      }
+      return result;
+    }
     function normalizedAngle(value) { return ((value % 360) + 360) % 360; }
     function renderRotation() {
       ballot.style.setProperty('--angle', rotation + 'deg');
@@ -95,7 +106,7 @@
     }
     function restoreAddress() {
       const params = new URL(window.location.href).searchParams;
-      letters.value = (params.get('letters') ?? 'כאן').slice(0, 3);
+      letters.value = limitLetters(params.get('letters') ?? 'כאן');
       caption.value = (params.get('text') ?? 'לוחצים כדי לשנות, גוררים כדי לסובב').slice(0, 80);
       const angle = Number(params.get('angle') ?? 0);
       rotation = Number.isFinite(angle) ? normalizedAngle(angle) : 0;
@@ -141,8 +152,18 @@
       syncAddress();
     }
     for (const field of [letters, caption]) {
-      field.addEventListener('input', () => { layoutText(); syncAddress(); });
+      field.addEventListener('input', event => {
+        if (event.isComposing) return;
+        if (field === letters) letters.value = limitLetters(letters.value);
+        layoutText();
+        syncAddress();
+      });
     }
+    letters.addEventListener('compositionend', () => {
+      letters.value = limitLetters(letters.value);
+      layoutText();
+      syncAddress();
+    });
     function fieldForPageY(y) {
       return y < window.innerHeight / 2 ? letters : caption;
     }
