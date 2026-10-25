@@ -9,7 +9,10 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff; }
-    #export { position: fixed; top: 20px; right: 20px; z-index: 2; padding: 10px 16px; border: 1px solid #ddd; border-radius: 7px; background: #fff; color: #333; font: 14px Arial, sans-serif; cursor: pointer; }
+    .tools { position: fixed; top: 20px; right: 20px; z-index: 2; display: flex; gap: 8px; }
+    .tools button { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid #ddd; border-radius: 7px; background: #fff; color: #333; cursor: pointer; }
+    .tools svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    #notice { position: fixed; top: 76px; right: 20px; z-index: 3; max-width: calc(100vw - 40px); border: 0; border-radius: 8px; background: #262626; color: white; padding: 14px 18px; font: 14px Arial, sans-serif; cursor: pointer; }
     #angle { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); color: #777; font: 13px Arial, sans-serif; direction: ltr; font-variant-numeric: tabular-nums; }
     main { min-height: 100svh; display: grid; place-items: center; overflow: hidden; }
     .ballot {
@@ -50,11 +53,16 @@
     }
     .text:focus-visible { outline: 1px solid #dadada; outline-offset: 5px; }
     #letters { font-size: 38cqw; line-height: 1.1; font-weight: 700; height: 1.16em; }
-    #caption { font-size: 7cqw; line-height: 1.35; resize: none; overflow: hidden; margin-top: 3cqw; }
+    #caption { font-size: 7cqw; line-height: 1.35; min-height: 44px; resize: none; overflow: hidden; margin-top: 3cqw; }
   </style>
 </head>
 <body>
-  <button id="export" type="button">העתקה ושמירת תמונה ↓</button>
+  <div class="tools">
+    <button id="export" type="button" aria-label="שמירת תמונה" title="שמירת תמונה"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg></button>
+    <button id="copy" type="button" aria-label="העתקת תמונה" title="העתקת תמונה"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></svg></button>
+    <button id="reset" type="button" aria-label="איפוס זווית וגדלי טקסט" title="איפוס זווית וגדלי טקסט"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button>
+  </div>
+  <button id="notice" type="button" role="status" hidden></button>
   <output id="angle" aria-label="זווית הסיבוב">0°</output>
   <main>
     <div class="ballot" id="ballot" role="group" aria-label="פתק הצבעה. גררו את הנייר לסיבוב">
@@ -93,7 +101,7 @@
       rotation = Number.isFinite(angle) ? normalizedAngle(angle) : 0;
       for (const [id, key] of [['letters', 'upperSize'], ['caption', 'lowerSize']]) {
         const size = Number(params.get(key) ?? 1);
-        textSizes[id] = Number.isFinite(size) && size > 0 ? Math.max(0.2, Math.min(5, size)) : 1;
+        textSizes[id] = Number.isFinite(size) && size > 0 ? Math.max(0.7, Math.min(2.5, size)) : 1;
       }
       renderRotation();
       layoutText();
@@ -106,8 +114,8 @@
       const style = getComputedStyle(ballot);
       const width = ballot.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
       const height = ballot.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-      let upper = width * 0.38 * textSizes.letters;
-      let lower = width * 0.07 * textSizes.caption;
+      let upper = Math.max(24, width * 0.38 * textSizes.letters);
+      let lower = Math.max(12, width * 0.07 * textSizes.caption);
       // Fit the actual glyphs, including wide Latin letters, inside the text field.
       letters.style.fontSize = upper + 'px';
       measure.font = getComputedStyle(letters).font;
@@ -128,7 +136,7 @@
       }
     }
     function resizeText(field, factor) {
-      textSizes[field.id] = Math.max(0.2, Math.min(5, textSizes[field.id] * factor));
+      textSizes[field.id] = Math.max(0.7, Math.min(2.5, textSizes[field.id] * factor));
       layoutText();
       syncAddress();
     }
@@ -167,7 +175,10 @@
       if (!pinch || event.touches.length !== 2) return;
       event.preventDefault();
       const distance = touchDistance(event.touches);
-      if (pinch.distance > 0 && distance > 0) resizeText(pinch.field, distance / pinch.distance);
+      if (pinch.distance >= 20 && distance >= 20) {
+        const gentleFactor = Math.pow(distance / pinch.distance, 0.3);
+        resizeText(pinch.field, Math.max(0.98, Math.min(1.02, gentleFactor)));
+      }
       pinch.distance = distance;
     }, { passive: false });
     for (const name of ['touchend', 'touchcancel']) ballot.addEventListener(name, () => { pinch = null; });
@@ -221,20 +232,23 @@
       }
       return lines;
     }
-    document.getElementById('export').addEventListener('click', async () => {
-      const button = document.getElementById('export');
-      button.disabled = true;
-      // Start the clipboard write during the click, before asynchronous PNG rendering.
-      let resolvePNG, rejectPNG;
-      const pngPromise = new Promise((resolve, reject) => { resolvePNG = resolve; rejectPNG = reject; });
-      pngPromise.catch(() => {});
-      let copied = Promise.resolve(false);
-      if (navigator.clipboard?.write && window.ClipboardItem) {
-        try {
-          copied = navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]).then(() => true, () => false);
-        } catch { /* Saving remains available when clipboard images are unsupported. */ }
-      }
-      try {
+    let noticeTimer;
+    const notice = document.getElementById('notice');
+    function showNotice(text) {
+      clearTimeout(noticeTimer);
+      notice.textContent = text;
+      notice.hidden = false;
+      noticeTimer = setTimeout(() => { notice.hidden = true; }, 4000);
+    }
+    notice.addEventListener('click', () => { notice.hidden = true; clearTimeout(noticeTimer); });
+    document.getElementById('reset').addEventListener('click', () => {
+      rotation = 0;
+      textSizes.letters = textSizes.caption = 1;
+      renderRotation();
+      layoutText();
+      syncAddress();
+    });
+    async function renderPNG() {
         await document.fonts.ready;
         const canvas = document.createElement('canvas');
         canvas.width = canvas.height = 1024;
@@ -268,19 +282,43 @@
         lines.forEach((line, index) => ctx.fillText(line, 0, top + caption.offsetTop + lineHeight * (index + 0.5)));
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
         if (!blob) throw new Error('PNG export failed');
-        resolvePNG(blob);
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'petek.png';
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-        button.textContent = await copied ? 'התמונה הועתקה ונשמרה ✓' : 'התמונה נשמרה ✓';
-        setTimeout(() => { button.textContent = 'העתקה ושמירת תמונה ↓'; }, 3000);
+
+        return blob;
+    }
+    function downloadPNG(blob) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'petek.png';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+    document.getElementById('export').addEventListener('click', async () => {
+      const button = document.getElementById('export');
+      button.disabled = true;
+      try {
+        const blob = await renderPNG();
+        const file = new File([blob], 'petek.png', { type: 'image/png' });
+        const isTouchDevice = matchMedia('(pointer: coarse)').matches;
+        if (isTouchDevice && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file] });
+        } else { downloadPNG(blob); }
       } catch (error) {
-        rejectPNG(error);
-        console.error(error);
-        alert('לא ניתן לשמור את התמונה. נסו שוב.');
+        if (error.name !== 'AbortError') showNotice('לא ניתן לשמור את התמונה. נסו שוב.');
+      } finally { button.disabled = false; }
+    });
+    document.getElementById('copy').addEventListener('click', async () => {
+      const button = document.getElementById('copy');
+      button.disabled = true;
+      try {
+        if (!navigator.clipboard?.write || !window.ClipboardItem) throw new Error('Clipboard unavailable');
+        // Safari requires starting the write in the original click handler.
+        const png = renderPNG();
+        png.catch(() => {});
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+        showNotice('הועתק! פייסט בווטסאפ לקבלת סטיקר');
+      } catch {
+        showNotice('ההעתקה לא הצליחה. אפשר לשמור את התמונה במקום.');
       } finally { button.disabled = false; }
     });
     restoreAddress();
